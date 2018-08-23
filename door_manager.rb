@@ -68,11 +68,29 @@ def door_open?
 
 end
 
-def log(user, operation)
+def log(user, action,idm="0")
+
+	# create log.txt
 	File.open("log.txt","a") do |f|
-		f.print("#{Time.now},#{user},#{operation}\n")
+		f.print("#{Time.now},#{user},#{action}\n")
 	end
-	print("\n#{Time.now},#{user},#{operation}\n")
+	print("\n#{Time.now},#{user},#{action}\n")
+
+	case action
+	when "auto" then
+		action_id = "1"
+	when "lock" then
+		action_id = "2"
+	when "unlock" then
+		action_id = "3"
+	when "No authority" then
+		action_id = "4"
+	else
+		action_id = "0"
+		action = "error"
+	end
+
+	system("curl -i -XPOST 'http://awayuki.local:8086/write?db=home-sensor' --data-binary 'doorkey,location=4,user=#{user},idm=#{idm},action=#{action} value=#{action_id}'")
 end
 
 def indicator(pattern)
@@ -152,14 +170,14 @@ def button
 	end
 end
 
-def touch()
+def touch
 	loop do
 		indicator("nfc_wait")
 
 		begin
 			idm = idm(nfc)
 		rescue Exception => e
-			log("door_manager", "ERROR: Unknow #{e.message}")
+			log("door_manager", "ERROR: NFC Reader not found")
 			print("Unknow ERROR!\n")
 			indicator("error")
 			sleep(10)
@@ -169,11 +187,11 @@ def touch()
 		unlock_user = USERS.key(idm)
 
 		unless unlock_user == nil
-			log(unlock_user, "auto")
+			log(unlock_user, "auto",idm)
 			print("Welcome back #{unlock_user}!\n")
 			auto_lock
 		else
-			log(idm, "No authority")
+			log(idm, "No authority",idm)
 			indicator("illegal")
 			print("Illegal user (#{idm})\n")
 			sleep(2)

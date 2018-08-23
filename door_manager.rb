@@ -2,36 +2,23 @@ require 'wiringpi2'
 require './config.rb'
 require './color_led.rb'
 
-
-def screen_sleep(n)
-	n.downto(1) do |i|
-		show = "#{i}sec..."
-		print(show)
-		sleep(1)
-		a = show.size
-		print("\e[#{a}D")
-	end
-end
-
-def nfc()
-	`sudo python /home/pi/Documents/nfc/trunk/examples/tagtool.py`
-end
-
-def idm(text)
-	m = text.match(/ID=(.*?)\s/)
-	idm =m[1]
+def get_idm
+	result = `sudo python /home/pi/Documents/nfc/trunk/examples/tagtool.py`
+	m = result.match(/ID=(.*?)\s/)
+	idm = m[1]
 	return idm
 end
 
-def unlock()
+def unlock
 	`echo #{SERVO_PIN}=#{UNLOCK_ANGLE}% > /dev/servoblaster`
 end
 
-def lock()
+def lock
 	`echo #{SERVO_PIN}=#{LOCK_ANGLE}% > /dev/servoblaster`
 end
 
 def door_state_change_open?
+	#状態が変わったとき真を返す
 	past_state = door_open?
 	loop do
 		state = door_open?
@@ -55,26 +42,19 @@ def door_open?
 	io = WiringPi::GPIO.new
 	io.pin_mode(READ_SW_PIN, WiringPi::INPUT)
 
-	if io.digital_read(READ_SW_PIN) == 0
-		#print("Door state open\n")
-		return true
-	elsif io.digital_read(READ_SW_PIN) == 1
-		#print("Door state close\n")
-		return false
-	else
-		print("Door state unknown\n")
-		return nil
-	end
+	return true if io.digital_read(READ_SW_PIN) == 0
+	return false if io.digital_read(READ_SW_PIN) == 1
+	return nil
 
 end
 
 def log(user, action,idm="0")
+	print("\n#{Time.now},#{user},#{action}\n")
 
 	# create log.txt
 	File.open("log.txt","a") do |f|
 		f.print("#{Time.now},#{user},#{action}\n")
 	end
-	print("\n#{Time.now},#{user},#{action}\n")
 
 	case action
 	when "auto" then
@@ -83,14 +63,15 @@ def log(user, action,idm="0")
 		action_id = "2"
 	when "unlock" then
 		action_id = "3"
-	when "No authority" then
+	when "unknow_card" then
 		action_id = "4"
 	else
 		action_id = "0"
 		action = "error"
 	end
 
-	system("curl -i -XPOST 'http://awayuki.local:8086/write?db=home-sensor' --data-binary 'doorkey,location=4,user=#{user},idm=#{idm},action=#{action} value=#{action_id}'")
+	# send influxdb
+	system("curl -i -XPOST '#{INFLUXDB}' --data-binary 'doorkey,location=4,user=#{user},idm=#{idm},action=#{action} value=#{action_id}'")
 end
 
 def indicator(pattern)
@@ -125,7 +106,7 @@ def auto_lock()
 	while door_state_change_open? ;	end	#close
 
 	indicator("auto_lock_wait")
-	screen_sleep(AUTO_LOCK_SEC)
+	sleep AUTO_LOCK_SEC
 
 	print("Locking...\n")
 	lock
@@ -143,7 +124,6 @@ def button
 		loop do
 
 			if io.digital_read(LOCK_BUTTON_PIN) == 1
-				
 				indicator("lock")
 				log("button", "lock")
 				print("Locking...")
@@ -155,7 +135,6 @@ def button
 			end
 
 			if io.digital_read(UNLOCK_BUTTON_PIN) == 1
-				
 				indicator("unlock")
 				log("button", "unlock")
 				print("Unlocking...")
@@ -175,10 +154,10 @@ def touch
 		indicator("nfc_wait")
 
 		begin
-			idm = idm(nfc)
+			idm = get_idm
 		rescue Exception => e
 			log("door_manager", "ERROR: NFC Reader not found")
-			print("Unknow ERROR!\n")
+			puts "ERROR: NFC Reader not found"
 			indicator("error")
 			sleep(10)
 			all(0)
@@ -191,7 +170,7 @@ def touch
 			print("Welcome back #{unlock_user}!\n")
 			auto_lock
 		else
-			log(idm, "No authority",idm)
+			log(idm, "unknow_card",idm)
 			indicator("illegal")
 			print("Illegal user (#{idm})\n")
 			sleep(2)
@@ -201,7 +180,8 @@ def touch
 	end
 end
 
-indicator("init"); sleep(1)
+indicator("init")
+sleep(1)
 log("door_manager", "START")
 
 button

@@ -1,4 +1,5 @@
 require 'wiringpi2'
+require 'fileutils'
 require './config.rb'
 require './color_led.rb'
 
@@ -9,11 +10,11 @@ def get_idm
 	return idm
 end
 
-def unlock
+def unlock_servo
 	`echo #{SERVO_PIN}=#{UNLOCK_ANGLE}% > /dev/servoblaster`
 end
 
-def lock
+def lock_servo
 	`echo #{SERVO_PIN}=#{LOCK_ANGLE}% > /dev/servoblaster`
 end
 
@@ -75,7 +76,6 @@ def log(user, action,idm="0")
 end
 
 def indicator(pattern)
-	#puts ("(indicator #{pattern})")
 
 	Thread.kill($led_th) unless pattern == "init"
 	all(0) unless pattern == "nfc_wait"
@@ -94,12 +94,11 @@ def indicator(pattern)
 	end
 end
 
-
 def auto_lock()
 	indicator("auto_lock")
 
 	print("Unlocking...\n")
-	unlock
+	unlock_servo
 
 	until door_state_change_open? ; end	#open
 	indicator("open")
@@ -109,7 +108,29 @@ def auto_lock()
 	sleep AUTO_LOCK_SEC
 
 	print("Locking...\n")
-	lock
+	lock_servo
+	indicator("wait")
+end
+
+def lock
+	indicator("lock")
+	log("button", "lock")
+	print("Locking...")
+
+	lock_servo
+	sleep(BUTTON_WAIT_SEC)
+	print("\tDone\n")
+	indicator("wait")
+end
+
+def unlock
+	indicator("unlock")
+	log("button", "unlock")
+	print("Unlocking...")
+
+	unlock_servo
+	sleep(BUTTON_WAIT_SEC)
+	print("\tDone\n")
 	indicator("wait")
 end
 
@@ -122,28 +143,8 @@ def button
 	button = Thread.new do
 		print("Start monitoring button\n")
 		loop do
-
-			if io.digital_read(LOCK_BUTTON_PIN) == 1
-				indicator("lock")
-				log("button", "lock")
-				print("Locking...")
-
-				lock
-				sleep(BUTTON_WAIT_SEC)
-				print("\tDone\n")
-				indicator("wait")
-			end
-
-			if io.digital_read(UNLOCK_BUTTON_PIN) == 1
-				indicator("unlock")
-				log("button", "unlock")
-				print("Unlocking...")
-
-				unlock
-				sleep(BUTTON_WAIT_SEC)
-				print("\tDone\n")
-				indicator("wait")
-			end
+			lock if io.digital_read(LOCK_BUTTON_PIN) == 1
+			unlock if io.digital_read(UNLOCK_BUTTON_PIN) == 1
 			sleep(0.1)
 		end
 	end
@@ -180,9 +181,35 @@ def touch
 	end
 end
 
+def file_monitor
+  flag_files = Hash.new
+  flag_files[:auto] = File.expand_path("./auto_flagfile")
+  flag_files[:lock] = File.expand_path("./lock_flagfile")
+  flag_files[:unlock] = File.expand_path("./unlock_flagfile")
+
+  file_monitor = Thread.new do
+	  loop do
+	    flag_files.each do |flag, path|
+
+	      if File.exist?(path)
+	        p "exist #{flag}"
+	        auto_lock if flag == :auto
+	        lock if flag == :lock
+	        unlock if flag == :unlock
+	        FileUtils.rm(path)
+	      else
+	        p "not exist #{flag}"
+	      end
+	    end
+	    sleep(0.5)
+	  end
+	end
+end
+
 indicator("init")
 sleep(1)
 log("door_manager", "START")
 
 button
+file_monitor
 touch

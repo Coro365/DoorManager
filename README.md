@@ -5,7 +5,7 @@ check my [blog](http://coro.hatenadiary.jp/entry/2015/12/23/233434)
 
 ## Using
 
-###nfcpy
+### nfcpy
 ```
 sudo apt-get install bzr
 cd <hoge>
